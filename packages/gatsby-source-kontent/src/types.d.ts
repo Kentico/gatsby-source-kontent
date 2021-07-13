@@ -20,6 +20,9 @@ interface CustomPluginOptions extends PluginOptions {
     previewDeliveryDomain: string;
   };
   includeRawContent: boolean = false;
+  experimental: {
+    managementApiTriggersUpdate: boolean = false;
+  };
 }
 
 interface PluginNamingConfiguration {

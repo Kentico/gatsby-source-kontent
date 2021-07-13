@@ -31,6 +31,12 @@ const pluginOptionsSchema = ({ Joi }: { Joi: any }) => {
     includeRawContent: Joi.boolean()
       .description("Include `internal.content` property as a part fo the GraphQL model.")
       .default(false),
+    experimental: Joi.object()
+    .keys({
+      managementApiTriggersUpdate: Joi.boolean()
+      .description("Turn on experimental handling of management API triggers for update.")
+      .default(false),
+    })
   });
 }
 

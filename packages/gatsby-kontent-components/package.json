@@ -1,7 +1,7 @@
 {
   "name": "@kentico/gatsby-kontent-components",
   "description": "Source plugin providing Kentico Kontent data from REST Delivery API",
-  "version": "7.0.0",
+  "version": "7.1.0-alpha.0",
   "main": "dist/index.js",
   "license": "MIT",
   "author": {

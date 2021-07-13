@@ -20,6 +20,7 @@
   ],
   "scripts": {
     "lint": "yarn workspaces run lint",
+    "lint:fix": "yarn workspaces run lint --fix",
     "test": "yarn workspaces run test",
     "build": "yarn workspaces run build",
     "build:source": "yarn workspace @kentico/gatsby-source-kontent build",
@@ -31,6 +32,7 @@
     "watch": "run-p watch:**",
     "prepublishOnly": "yarn build",
     "develop:site": "yarn workspace @kentico/gatsby-starter-kontent-hello-world develop",
+    "develop:site:preview": "yarn workspace @kentico/gatsby-starter-kontent-hello-world develop:preview",
     "develop:navigation": "yarn workspace @kentico/kontent-gatsby-example-navigation develop",
     "develop:resolution": "yarn workspace @kentico/kontent-gatsby-example-resolution develop",
     "develop:relationships": "yarn workspace @kentico/kontent-gatsby-example-relationships develop",

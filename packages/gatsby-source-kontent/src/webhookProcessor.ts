@@ -4,33 +4,51 @@ import { CustomPluginOptions, KontentItem, KontentItemInput } from "./types"
 import * as client from "./client";
 import { addPreferredLanguageProperty, alterRichTextElements, getKontentItemLanguageVariantArtifact } from "./sourceNodes.items";
 import { getKontentItemNodeStringForId, getKontentTaxonomyTypeName, getKontentTypeTypeName, RICH_TEXT_ELEMENT_TYPE_NAME, PREFERRED_LANGUAGE_IDENTIFIER, getKontentItemInterfaceName } from "./naming";
-import { IWebhookDeliveryResponse, IWebhookMessage } from '@kentico/kontent-webhook-helper';
+import { IWebhookDeliveryItem, IWebhookDeliveryResponse, IWebhookMessage, IWebhookWorkflowDataItem, IWebhookWorkflowResponse } from '@kentico/kontent-webhook-helper';
 import _ from 'lodash';
 
-const parseKontentWebhookBody = (api: SourceNodesArgs): IWebhookDeliveryResponse | null => {
-  const parsedBody = api.webhookBody as IWebhookDeliveryResponse;
-  const isCorrectStructure = parsedBody?.data?.items?.every(item => item.language && item.id)
-    && parsedBody?.message?.api_name
-    && parsedBody?.message?.project_id
-    && parsedBody?.message?.operation !== null;
+const parseKontentWebhookBody = (api: SourceNodesArgs): IWebhookDeliveryResponse | IWebhookWorkflowResponse | null => {
 
-  if (isCorrectStructure) {
-    return parsedBody;
+  if ((api.webhookBody as IWebhookDeliveryResponse)?.message?.api_name === "delivery_preview" || (api.webhookBody as IWebhookDeliveryResponse)?.message?.api_name === "delivery_production") {
+    const parsedBody = api.webhookBody as IWebhookDeliveryResponse;
+
+    const isCorrectStructure = parsedBody?.data?.items?.every(item => item.language && item.id)
+      && parsedBody?.message?.api_name
+      && parsedBody?.message?.project_id
+      && parsedBody?.message?.operation !== null;
+
+    if (isCorrectStructure) {
+      return parsedBody;
+    }
+  }
+  else if ((api.webhookBody as IWebhookWorkflowResponse)?.message?.api_name === "content_management") {
+    const parsedBody = api.webhookBody as IWebhookWorkflowResponse;
+
+    const isCorrectStructure = parsedBody?.data?.items?.every(item => item.language && item.transition_from && item.transition_to && item.item.id)
+      && parsedBody?.message?.api_name
+      && parsedBody?.message?.project_id
+      && parsedBody?.message?.operation !== null;
+
+    if (isCorrectStructure) {
+      return parsedBody;
+    }
   }
 
   return null;
 }
 
-const isKontentSupportedWebhook = (message: IWebhookMessage, projectId: string): boolean => {
-  const isCorrectProject = message.project_id === projectId;
+const isKontentSupportedWebhook = (message: IWebhookMessage, pluginConfig: CustomPluginOptions): boolean => {
+  const isCorrectProject = message.project_id === pluginConfig.projectId;
   const isPreviewWebhook = 'delivery_preview' === message.api_name
     && ['upsert', 'archive', 'restore'].includes(message.operation);
   const isBuildWebhook = 'delivery_production' === message.api_name
     && ['publish', 'unpublish'].includes(message.operation);
-  const isCorrectMessageType = message.type == 'content_item_variant'
+  const isWorkflowWebhook = 'content_management' === message.api_name
+    && message.operation === 'change_workflow_step';
+  const isCorrectMessageType = message.type == 'content_item_variant';
 
   return isCorrectProject
-    && (isPreviewWebhook || isBuildWebhook)
+    && (isPreviewWebhook || isBuildWebhook || (isWorkflowWebhook && pluginConfig?.experimental?.managementApiTriggersUpdate))
     && isCorrectMessageType
 };
 
@@ -55,12 +73,14 @@ const isContentComponent = (data: KontentItem): boolean => {
 
 const handleUpsertItem = async (
   api: SourceNodesArgs,
-  pluginConfig: CustomPluginOptions
+  pluginConfig: CustomPluginOptions,
+  itemId: string,
+  itemLanguage?: string
 ): Promise<string[]> => {
-  const itemInfo = (api.webhookBody as IWebhookDeliveryResponse)?.data.items[0];
 
-  if (!pluginConfig.languageCodenames.includes(itemInfo.language)) {
-    api.reporter.verbose(`Cant find specified language ${itemInfo.language} in plugin configuration`);
+  // TODO - language codename is not provided for management call
+  if (itemLanguage && !pluginConfig.languageCodenames.includes(itemLanguage)) {
+    api.reporter.verbose(`Cant find specified language ${itemLanguage} in plugin configuration`);
     return [];
   }
 
@@ -70,9 +90,9 @@ const handleUpsertItem = async (
 
   const createdItemsIds = [];
   for (const lang of pluginConfig.languageCodenames) {
-    const { item: kontentItem, modularKontent } = await client.loadKontentItem(itemInfo.id, lang, pluginConfig, true);
+    const { item: kontentItem, modularKontent } = await client.loadKontentItem(itemId, lang, pluginConfig, true);
     if (kontentItem === undefined) {
-      api.reporter.verbose(`Kontent item (${itemInfo.id}) language variant (${lang}) not found on the kontent delivery API for update`);
+      api.reporter.verbose(`Kontent item (${itemId}) language variant (${lang}) not found on the kontent delivery API for update`);
       continue;
     }
 
@@ -172,7 +192,7 @@ const handleIncomingWebhook = async (
     return;
   }
 
-  if (!isKontentSupportedWebhook(webhook.message, pluginConfig.projectId)) {
+  if (!isKontentSupportedWebhook(webhook.message, pluginConfig)) {
     api.reporter.verbose('This Kontent webhook is not handled by the Gatsby source kontent source plugin');
     return;
   }
@@ -185,12 +205,14 @@ const handleIncomingWebhook = async (
   const processedItemIds: string[] = [];
   if (webhook.message.api_name === 'delivery_preview') {
 
+    const item = (webhook as IWebhookDeliveryResponse).data.items[0];
+
     // TODO: Webhook header signature (once headers are available)
     // use signatureHelper '@kentico/kontent-webhook-helper'
     // https://github.com/gatsbyjs/gatsby/issues/23593
 
     if (webhook.message.operation === "upsert" || webhook.message.operation === "restore") {
-      const processedIds = await handleUpsertItem(api, pluginConfig);
+      const processedIds = await handleUpsertItem(api, pluginConfig, item.id, item.language);
       processedItemIds.push(...processedIds);
     }
 
@@ -200,12 +222,14 @@ const handleIncomingWebhook = async (
     }
   } else if (webhook.message.api_name === 'delivery_production') {
 
+    const item = (webhook as IWebhookDeliveryResponse).data.items[0];
+
     // TODO: Webhook header signature (once headers are available)
     // use signatureHelper '@kentico/kontent-webhook-helper'
     // https://github.com/gatsbyjs/gatsby/issues/23593
 
     if (webhook.message.operation === "publish") {
-      const processedIds = await handleUpsertItem(api, pluginConfig);
+      const processedIds = await handleUpsertItem(api, pluginConfig, item.id, item.language);
       processedItemIds.push(...processedIds);
     }
 
@@ -213,7 +237,22 @@ const handleIncomingWebhook = async (
       const processedIds = await handleDeleteItem(api, pluginConfig);
       processedItemIds.push(...processedIds);
     }
-  } else {
+  } else if (pluginConfig?.experimental?.managementApiTriggersUpdate && webhook.message.api_name === 'content_management') {
+
+    const item = (webhook as IWebhookWorkflowResponse).data.items[0];
+
+    // TODO: Webhook header signature (once headers are available)
+    // use signatureHelper '@kentico/kontent-webhook-helper'
+    // https://github.com/gatsbyjs/gatsby/issues/23593
+
+    if (webhook.message.operation === "change_workflow_step") {
+      const processedIds = await handleUpsertItem(api, pluginConfig, item.item.id);
+      processedItemIds.push(...processedIds);
+    } else {
+      api.reporter.verbose(`Operation '${webhook.message.operation}' is not supported yet!`);
+    }
+  }
+  else {
     api.reporter.verbose(`Webhook is not supported yet!`);
     api.reporter.verbose(JSON.stringify(webhook, null, 2));
     return;
@@ -244,3 +283,4 @@ const handleIncomingWebhook = async (
 export {
   handleIncomingWebhook
 }
+

@@ -37,6 +37,9 @@ describe(`pluginOptionsSchema`, () => {
       proxy: {
         deliveryDomain: "deliver.example.com",
         previewDeliveryDomain: "preview-deliver.example.com"
+      },
+      experimental: {
+        managementApiTriggersUpdate: true
       }
     };
 

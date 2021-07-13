@@ -27,6 +27,9 @@ module.exports = {
           previewDeliveryDomain:
             process.env.KONTENT_PREVIEW_DELIVERY_DOMAIN || undefined,
         },
+        experimental: {
+          managementApiTriggersUpdate: true
+        }
       },
     },
     "gatsby-plugin-image",
